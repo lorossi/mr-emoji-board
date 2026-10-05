@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MR Emoji Board</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👀</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="titlebar">
+    <div>
+      <h1>⛙ MR Emoji Board</h1>
+      <div class="sub" id="sub">Harvesting emoji…</div>
+    </div>
+    <div class="actions">
+      <button id="refresh" title="Re-harvest Mattermost and GitLab now">↻ Refresh</button>
+      <button id="theme" title="Toggle theme">◐</button>
+    </div>
+  </div>
+  <div class="controls">
+    <input id="q" type="search" placeholder="Filter: title, ticket, app, branch, author…" size="34">
+    <select id="proj"><option value="">All projects</option></select>
+    <input id="me" placeholder="Your username" size="14">
+    <label><input id="mine" type="checkbox"> Only mine</label>
+    <label><input id="hideDrafts" type="checkbox"> Hide drafts</label>
+  </div>
+  <div class="banner" id="banner"></div>
+</header>
+<main>
+  <div class="stats" id="stats"></div>
+  <section class="box forgotten">
+    <h3>🧹 Forgotten updates <span class="n" id="forgottenN"></span></h3>
+    <ul id="forgotten"></ul>
+  </section>
+  <div class="board" id="board"><div class="loading">Counting 👀 and ✅…</div></div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
