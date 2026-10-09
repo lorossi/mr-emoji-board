@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mr_board.config import Settings
 from mr_board.harvest import Harvester, Snapshot
+from mr_board.oauth import MattermostOAuth
 
 log = logging.getLogger("uvicorn.error")
 STATIC = Path(__file__).parent / "static"
@@ -40,7 +42,8 @@ class HealthResponse:
 class Board:
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._harvester = Harvester(settings)
+        self.oauth = MattermostOAuth(settings)
+        self._harvester = Harvester(settings, auth=self.oauth)
         self._data: Snapshot | None = None
         self._error: str | None = None
         self._lock = asyncio.Lock()
@@ -120,6 +123,28 @@ async def refresh() -> RefreshResponse:
         raise HTTPException(429, "Easy there, harvested less than 30s ago")
     await board.refresh()
     return RefreshResponse("ok", board.error)
+
+
+@app.get("/oauth/login")
+async def oauth_login() -> RedirectResponse:
+    """Send the browser to Mattermost to authorise the board (once; tokens are then refreshed)."""
+    board: Board = app.state.board
+    return RedirectResponse(board.oauth.authorize_url())
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(
+    code: str | None = None, state: str = "", error: str | None = None
+) -> RedirectResponse:
+    board: Board = app.state.board
+    if error or not code:
+        raise HTTPException(400, f"Mattermost did not authorise the board: {error or 'no code'}")
+    try:
+        await board.oauth.connect(code, state)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await board.refresh()
+    return RedirectResponse("../", status_code=303)  # the board, also behind a path prefix
 
 
 @app.get("/api/health")

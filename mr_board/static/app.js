@@ -23,7 +23,7 @@ const COLS = [
   ["needs_review", "🙋 Needs review"],
   ["in_review", "👀 In review"],
   ["commented", "📝 Back to author"],
-  ["approved", "✅ Needs merge"],
+  ["approved", "✅ Approved"],
   ["merged", "⛙ Merged"], // title gets "(N days)" from the snapshot
 ];
 const HOLD = new Set(["zzz", "hourglass_flowing_sand", "hourglass"]);
@@ -90,6 +90,12 @@ function lies(mr) {
     !gl.approved_by.length
   )
     out.push(["✅ but 0 GitLab approvals", "bad"]);
+  if (
+    gl.state === "opened" &&
+    !["approved", "merged"].includes(mr.emoji_state) &&
+    gl.approved_by.length
+  )
+    out.push(["approved on GitLab, no ✅", "warn"]);
   if (gl.state === "closed") out.push(["closed, no ❌", "warn"]);
   return out;
 }
@@ -147,7 +153,7 @@ function filtered() {
   const me = $("me").value.trim();
   return DATA.mrs.filter((mr) => {
     if (proj && mr.project !== proj) return false;
-    if ($("mine").checked && me && !touches(mr, me)) return false;
+    if ($("mine").checked && me && author(mr) !== me) return false;
     if ($("hideDrafts").checked && mr.gitlab?.draft) return false;
     if (
       q &&
@@ -240,6 +246,12 @@ function renderForgotten(mrs) {
       : `<li class="empty">Every emoji matches GitLab 🎉</li>`;
 }
 
+function showBanner(text) {
+  $("banner").textContent = text;
+  if (text.includes("/oauth/login"))
+    $("banner").insertAdjacentHTML("beforeend", ' <a href="oauth/login">Connect to Mattermost →</a>');
+}
+
 async function load() {
   try {
     const resp = await fetch("api/board");
@@ -247,15 +259,13 @@ async function load() {
     if (!resp.ok) throw new Error(body.detail || resp.statusText);
     const first = !DATA;
     DATA = body;
-    $("banner").textContent = body.error
-      ? `Last harvest failed, showing older data: ${body.error}`
-      : "";
+    showBanner(body.error ? `Last harvest failed, showing older data: ${body.error}` : "");
     $("sub").textContent =
-      `#${DATA.channel} · posts from the last ${DATA.days} days · ${DATA.mrs.length} MRs · harvested ${new Date(DATA.generated_at).toLocaleTimeString()}`;
+      `#${DATA.channel} · open MRs + finished ones from the last ${DATA.days} days · ${DATA.mrs.length} MRs · harvested ${new Date(DATA.generated_at).toLocaleTimeString()}`;
     if (first) fillProjects();
     render();
   } catch (err) {
-    $("banner").textContent = `Could not load the board: ${err.message}`;
+    showBanner(`Could not load the board: ${err.message}`);
     if (!DATA) setTimeout(load, 5000);
   }
 }
@@ -277,8 +287,9 @@ async function refresh() {
   btn.textContent = "↻ Harvesting…";
   try {
     const resp = await fetch("api/refresh", { method: "POST" });
-    if (!resp.ok) $("banner").textContent = (await resp.json()).detail;
+    const detail = resp.ok ? null : (await resp.json()).detail;
     await load();
+    if (detail) showBanner(detail); // load() resets the banner
   } finally {
     btn.disabled = false;
     btn.textContent = "↻ Refresh";

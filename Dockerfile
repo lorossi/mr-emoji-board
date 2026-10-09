@@ -11,7 +11,7 @@ COPY settings.env ./
 COPY mr_board ./mr_board
 RUN uv sync --locked --no-dev
 
-RUN useradd --create-home board
+RUN useradd --create-home board && mkdir /app/state && chown board /app/state
 USER board
 
 ENV PATH="/app/.venv/bin:$PATH"

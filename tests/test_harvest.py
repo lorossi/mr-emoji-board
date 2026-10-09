@@ -1,4 +1,6 @@
 import asyncio
+import copy
+import re
 import time
 
 import httpx
@@ -36,9 +38,7 @@ def mm_post(pid, message, root_id="", reactions=(), user="u_author"):
 
 
 POSTS = {
-    "root": mm_post(
-        "root", APP_POST, reactions=[("eyes", "u_rev"), ("white_check_mark", "u_rev")]
-    ),
+    "root": mm_post("root", APP_POST, reactions=[("eyes", "u_rev"), ("white_check_mark", "u_rev")]),
     "reply": mm_post("reply", "lgtm", root_id="root", user="u_rev"),
     "chat": mm_post("chat", "anyone up for coffee?"),
 }
@@ -156,3 +156,117 @@ def test_channel_mrs_are_newest_first():
     channel = ChannelHarvest(mrs=[old, new], users={})
     assert channel.get_mrs() == [new, old]
     assert channel.mrs == [old, new]  # not sorted in place
+
+
+class Channel:
+    """A Mattermost channel whose posts can change between harvests."""
+
+    def __init__(self, posts: dict[str, dict]):
+        self.posts = posts
+        self.calls: list[str] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix("/api/v4")
+        self.calls.append(path)
+        if path == "/channels/chan/posts":
+            listed = {k: p for k, p in self.posts.items() if p.get("listed", True)}
+            page = int(request.url.params["page"])
+            return httpx.Response(
+                200, json={"order": list(listed) if page == 0 else [], "posts": listed}
+            )
+        if m := re.fullmatch(r"/posts/(\w+)/thread", path):
+            pid = m[1]
+            if pid not in self.posts:
+                return httpx.Response(404, json={"message": "not found"})
+            thread = {k: p for k, p in self.posts.items() if k == pid or p["root_id"] == pid}
+            return httpx.Response(200, json={"order": list(thread), "posts": thread})
+        if path == "/users/ids":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    def harvester(self, settings) -> Harvester:
+        from dataclasses import replace
+
+        return Harvester(replace(settings, gitlab_token=""), httpx.MockTransport(self.handler))
+
+    def harvest(self, harvester: Harvester) -> Snapshot:
+        self.calls.clear()
+        return asyncio.run(harvester.harvest())
+
+
+def channel_with_mr() -> Channel:
+    return Channel(copy.deepcopy(POSTS))
+
+
+def test_known_mr_is_reread_for_new_reactions(settings):
+    channel = channel_with_mr()
+    harvester = channel.harvester(settings)
+    assert channel.harvest(harvester).mrs[0].emoji_state is EmojiState.APPROVED
+
+    # The post scrolled out of the scanned window, then got merged and a reply.
+    channel.posts["root"]["listed"] = channel.posts["reply"]["listed"] = False
+    channel.posts["root"]["metadata"]["reactions"].append(
+        {"emoji_name": "merged", "user_id": "u_rev", "create_at": NOW}
+    )
+    channel.posts["reply2"] = mm_post("reply2", "merged!", root_id="root", user="u_author")
+    channel.posts["reply2"]["listed"] = False
+
+    mr = channel.harvest(harvester).mrs[0]
+    assert "/posts/root/thread" in channel.calls
+    assert mr.emoji_state is EmojiState.MERGED
+    assert mr.replies == 2
+
+
+def test_new_mrs_come_from_the_scan_without_rereading(settings):
+    channel = channel_with_mr()
+    data = channel.harvest(channel.harvester(settings))
+    assert len(data.mrs) == 1 and data.mrs[0].replies == 1
+    assert not any(c.endswith("/thread") for c in channel.calls)
+
+
+def test_store_survives_restart(settings):
+    channel = channel_with_mr()
+    channel.harvest(channel.harvester(settings))
+    channel.posts["root"]["listed"] = False
+    assert len(channel.harvest(channel.harvester(settings)).mrs) == 1
+
+
+def test_open_mr_stays_after_harvest_days(settings):
+    channel = channel_with_mr()
+    harvester = channel.harvester(settings)
+    channel.harvest(harvester)
+    channel.posts["root"]["create_at"] = NOW - 90 * 86400 * 1000
+    harvester._store._db.execute("UPDATE mr_posts SET create_at = 0")
+    channel.posts["root"]["listed"] = False
+    assert [m.post_id for m in channel.harvest(harvester).mrs] == ["root"]
+
+
+def test_deleted_post_is_forgotten(settings):
+    channel = channel_with_mr()
+    harvester = channel.harvester(settings)
+    channel.harvest(harvester)
+    del channel.posts["root"]
+    assert channel.harvest(harvester).mrs == []
+
+
+def test_finished_mr_is_no_longer_reread(settings):
+    channel = channel_with_mr()
+    channel.posts["root"]["metadata"]["reactions"].append(
+        {"emoji_name": "merged", "user_id": "u_rev", "create_at": NOW}
+    )
+    harvester = channel.harvester(settings)
+    channel.harvest(harvester)  # marks it finished
+    channel.posts["root"]["listed"] = False
+    data = channel.harvest(harvester)
+    assert [m.post_id for m in data.mrs] == ["root"]  # still shown: posted within HARVEST_DAYS
+    assert not any(c.endswith("/thread") for c in channel.calls)
+
+
+def test_merged_by_emoji_but_unknown_to_gitlab_is_still_reread():
+    from .test_parse import NO_APP_POST, post
+
+    mr = MergeRequest.from_post(
+        post(NO_APP_POST, [{"emoji_name": "merged", "user_id": "u", "create_at": 1}])
+    )
+    assert mr.finished(gitlab_checked=False)
+    assert not mr.finished(gitlab_checked=True)  # GitLab lookup failed: don't retire it yet

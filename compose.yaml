@@ -8,12 +8,18 @@ services:
     env_file: settings.env
     # Mounted at /run/secrets/<name>, which the app reads by default.
     secrets:
-      - mm_token
+      - mm_client_secret
       - gitlab_token
+    # Mattermost OAuth tokens, kept across restarts and rebuilds.
+    volumes:
+      - state:/app/state
     restart: unless-stopped
 
+volumes:
+  state:
+
 secrets:
-  mm_token:
-    file: ./secrets/mm_token
+  mm_client_secret:
+    file: ./secrets/mm_client_secret
   gitlab_token:
     file: ./secrets/gitlab_token

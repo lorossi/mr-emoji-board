@@ -79,3 +79,32 @@ def test_board_mrs_include_emoji_state(client):
 
 def test_health(client):
     assert client.get("/api/health").json() == {"ready": False, "error": None}
+
+
+def test_oauth_login_redirects_to_mattermost(client):
+    resp = client.get("/oauth/login", follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"].startswith("https://mm.test/oauth/authorize?")
+
+
+def test_oauth_callback_rejects_unknown_state(client):
+    resp = client.get("/oauth/callback?code=c&state=forged", follow_redirects=False)
+    assert resp.status_code == 400
+
+
+def test_oauth_callback_connects_and_harvests(client, monkeypatch):
+    oauth = client.app.state.board.oauth
+    connected = []
+
+    async def fake_connect(code, state):
+        connected.append((code, state))
+
+    monkeypatch.setattr(oauth, "connect", fake_connect)
+    resp = client.get("/oauth/callback?code=c&state=s", follow_redirects=False)
+    assert resp.status_code == 303 and connected == [("c", "s")]
+    assert client.get("/api/board").json()["channel"] == "c"
+
+
+def test_oauth_callback_reports_denial(client):
+    resp = client.get("/oauth/callback?error=access_denied", follow_redirects=False)
+    assert resp.status_code == 400 and "access_denied" in resp.json()["detail"]

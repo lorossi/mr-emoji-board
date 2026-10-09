@@ -12,6 +12,8 @@ import httpx
 from pydantic import computed_field
 
 from mr_board.config import Settings
+from mr_board.oauth import MattermostOAuth
+from mr_board.store import PostStore
 
 # Reaction name -> meaning. Mattermost stores :pencil: as "memo".
 REVIEW = {"eyes", "eyesintensify"}
@@ -19,6 +21,9 @@ COMMENT = {"memo", "pencil", "pencil2"}
 APPROVE = {"white_check_mark", "heavy_check_mark"}
 MERGED = {"merged"}
 CLOSED = {"x", "no_entry_sign"}
+
+DAY_MS = 86400 * 1000
+SCAN_OVERLAP_MS = 10 * 60 * 1000  # re-scan a little before the last scan, for posts saved late
 
 
 @dataclass(frozen=True)
@@ -143,11 +148,7 @@ class MergeRequest:
             app=app.group(1) if app else None,
             ticket=ticket.group(1) if ticket else None,
             title=title,
-            domain=[
-                d.strip()
-                for d in fields.get("Domain", "").strip("`").split(",")
-                if d.strip()
-            ],
+            domain=[d.strip() for d in fields.get("Domain", "").strip("`").split(",") if d.strip()],
             size=size.group(1).strip() if size else None,
             added=int(size.group(2)) if size else None,
             removed=int(size.group(3)) if size else None,
@@ -163,6 +164,12 @@ class MergeRequest:
     @property
     def emoji_state(self) -> EmojiState:
         return EmojiState.from_reactions(self.reactions)
+
+    def finished(self, gitlab_checked: bool) -> bool:
+        """Merged or closed by emoji and, when GitLab is checked, by GitLab: no need to re-read it."""
+        if self.emoji_state not in (EmojiState.MERGED, EmojiState.CLOSED):
+            return False
+        return not gitlab_checked or (self.gitlab is not None and self.gitlab.is_final)
 
     @property
     def user_ids(self) -> set[str]:
@@ -204,41 +211,78 @@ class MattermostClient:
     def __init__(
         self,
         settings: Settings,
+        auth: httpx.Auth,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         self.s = settings
+        self.auth = auth
         self.transport = transport
+        self._reread_slots = asyncio.Semaphore(8)
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             base_url=f"{self.s.mm_url}/api/v4",
-            headers={"Authorization": f"Bearer {self.s.mm_token}"},
+            auth=self.auth,
             timeout=30,
             transport=self.transport,
         )
 
-    async def fetch_merge_requests(self) -> ChannelHarvest:
-        """Return the MR posts of the channel, with their threads, and who is involved."""
-        async with self._client() as mm:
-            posts = await self._fetch_posts(mm)
+    async def fetch_merge_requests(self, store: PostStore) -> ChannelHarvest:
+        """Return the channel's MR posts, with their threads, and who is involved.
 
-            replies: dict[str, list[dict]] = {}
-            for p in posts.values():
-                if p["root_id"]:
-                    replies.setdefault(p["root_id"], []).append(p)
+        Only posts since the last scan are read from the channel; MRs found earlier and not
+        finished yet are re-read one by one, for their current reactions and replies.
+        """
+        now = int(time.time() * 1000)
+        last_scan = store.last_scan()
+        if last_scan is None:  # first run: fill the store
+            cutoff = now - self.s.harvest_days * DAY_MS
+        else:
+            cutoff = last_scan - SCAN_OVERLAP_MS
+
+        async with self._client() as mm:
+            scanned = await self._scan(mm, cutoff)
+            # Replies come after their post, so the scan holds every reply of a post it found.
+            for root, replies in scanned.values():
+                store.save(root, replies)
+            older = [i for i in store.active_ids() if i not in scanned]
+            await asyncio.gather(*(self._reread(mm, store, i) for i in older))
+            store.set_last_scan(now)
 
             mrs = []
-            for p in posts.values():
-                if p["root_id"] or not (mr := MergeRequest.from_post(p)):
-                    continue
-                mr.attach_thread(replies.get(p["id"], []))
-                mrs.append(mr)
-
+            for root, replies in store.load(since=now - self.s.harvest_days * DAY_MS):
+                if mr := MergeRequest.from_post(root):
+                    mr.attach_thread(replies)
+                    mrs.append(mr)
             users = await self._usernames(mm, set().union(*(mr.user_ids for mr in mrs)))
         return ChannelHarvest(mrs, users)
 
-    async def _fetch_posts(self, mm: httpx.AsyncClient) -> dict:
-        cutoff = (time.time() - self.s.harvest_days * 86400) * 1000
+    async def _scan(self, mm: httpx.AsyncClient, cutoff: int) -> dict[str, tuple[dict, list[dict]]]:
+        """The MR posts created since `cutoff` (ms), with their replies, by post id."""
+        posts = await self._fetch_posts(mm, cutoff)
+        replies: dict[str, list[dict]] = {}
+        for p in posts.values():
+            if p["root_id"]:
+                replies.setdefault(p["root_id"], []).append(p)
+        return {
+            p["id"]: (p, replies.get(p["id"], []))
+            for p in posts.values()
+            if not p["root_id"] and MergeRequest.from_post(p)
+        }
+
+    async def _reread(self, mm: httpx.AsyncClient, store: PostStore, post_id: str) -> None:
+        """Refresh a known MR post and its replies; forget it if it was deleted."""
+        async with self._reread_slots:
+            resp = await mm.get(f"/posts/{post_id}/thread")
+        if resp.status_code in (403, 404):  # deleted, or the channel became unreadable for it
+            store.delete(post_id)
+            return
+        resp.raise_for_status()
+        posts = resp.json()["posts"]
+        root = posts.pop(post_id)
+        store.save(root, [p for p in posts.values() if not p.get("delete_at")])
+
+    async def _fetch_posts(self, mm: httpx.AsyncClient, cutoff: int) -> dict:
         posts, page = {}, 0
         while True:
             resp = await mm.get(
@@ -256,9 +300,7 @@ class MattermostClient:
                 break
             page += 1
         return {
-            k: v
-            for k, v in posts.items()
-            if v["create_at"] >= cutoff and not v.get("delete_at")
+            k: v for k, v in posts.items() if v["create_at"] >= cutoff and not v.get("delete_at")
         }
 
     async def _usernames(self, mm: httpx.AsyncClient, ids: set[str]) -> dict[str, str]:
@@ -316,9 +358,7 @@ class GitLabClient:
             if appr.status_code != 200:
                 return info
 
-            info.approved_by = [
-                a["user"]["username"] for a in appr.json()["approved_by"]
-            ]
+            info.approved_by = [a["user"]["username"] for a in appr.json()["approved_by"]]
 
         if info.is_final:
             self._final_cache[mr.mr_url] = info
@@ -331,20 +371,24 @@ class Harvester:
         self,
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
+        auth: httpx.Auth | None = None,
     ):
         self._settings = settings
         self._mattermost = MattermostClient(
             settings,
+            auth or MattermostOAuth(settings),
             transport,
         )  # transport injectable for tests
         self.gitlab = GitLabClient(settings, transport)
+        self._store = PostStore(settings.state_dir / "board.db")
 
     async def harvest(self) -> Snapshot:
         started = time.time()
-        channel = await self._mattermost.fetch_merge_requests()
+        channel = await self._mattermost.fetch_merge_requests(self._store)
         requests = channel.get_mrs()
         if self.gitlab.enabled:
             await self.gitlab.enrich(requests)
+        self._store.mark_done([mr.post_id for mr in requests if mr.finished(self.gitlab.enabled)])
 
         return Snapshot(
             generated_at=int(time.time() * 1000),

@@ -3,3 +3,5 @@ __pycache__/
 data.json
 secrets/
 .env
+.vscode/
+state/
