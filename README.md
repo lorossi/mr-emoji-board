@@ -14,7 +14,8 @@ and cross-checks each MR against GitLab.
 
 The last of 📝/✅ wins, so a 📝 after a ✅ sends the MR back to the author.
 GitLab decides merged/closed; mismatches (including a ✅ that disagrees with the GitLab
-approvals, either way) show up under "🧹 Forgotten updates".
+approvals, either way, or a GitLab "request changes" review without a 📝) show up under
+"Reactions out of sync".
 
 ## Secrets
 

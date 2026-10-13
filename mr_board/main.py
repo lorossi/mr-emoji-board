@@ -153,4 +153,13 @@ async def health() -> HealthResponse:
     return HealthResponse(ready=board.data is not None, error=board.error)
 
 
-app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files the browser must revalidate (cheap, via ETag), so a redeploy shows up on reload."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", RevalidatedStaticFiles(directory=STATIC, html=True), name="static")

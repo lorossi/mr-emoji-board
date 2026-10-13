@@ -71,6 +71,14 @@ def make_transport(calls: list[str]):
                 return httpx.Response(
                     200, json={"approved_by": [{"user": {"username": "rossilo"}}]}
                 )
+            if path.endswith("/reviewers"):
+                return httpx.Response(
+                    200,
+                    json=[
+                        {"user": {"username": "rossilo"}, "state": "approved"},
+                        {"user": {"username": "frunquis"}, "state": "requested_changes"},
+                    ],
+                )
             return httpx.Response(
                 200,
                 json={
@@ -99,6 +107,7 @@ def test_harvest_end_to_end(settings):
     assert [r.emoji for r in mr.reactions] == ["eyes", "white_check_mark"]
     assert mr.gitlab.state == "opened"
     assert mr.gitlab.approved_by == ["rossilo"]
+    assert mr.gitlab.changes_requested_by == ["frunquis"]
     assert data.users == {"u_author": "kekessle", "u_rev": "rossilo"}
     assert data.gitlab_checked is True
 
@@ -112,6 +121,7 @@ def test_snapshot_serialises_to_frontend_shape(settings):
     assert mr["emoji_state"] == "approved"
     assert mr["reactions"][0] == {"emoji": "eyes", "user_id": "u_rev", "at": NOW - 900}
     assert mr["gitlab"]["approved_by"] == ["rossilo"]
+    assert mr["gitlab"]["changes_requested_by"] == ["frunquis"]
 
 
 def test_harvest_without_gitlab_token(settings):

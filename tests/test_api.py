@@ -64,7 +64,9 @@ def test_failed_harvest_keeps_previous_snapshot(client, monkeypatch):
 
 def test_frontend_is_served(client):
     assert "MR Emoji Board" in client.get("/").text
-    assert client.get("/app.js").status_code == 200
+    js = client.get("/app.js")
+    assert js.status_code == 200
+    assert js.headers["cache-control"] == "no-cache"
 
 
 def test_board_mrs_include_emoji_state(client):

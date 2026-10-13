@@ -74,6 +74,7 @@ class GitLabInfo:
     conflicts: bool
     pipeline: str | None
     approved_by: list[str] = field(default_factory=list)
+    changes_requested_by: list[str] = field(default_factory=list)
 
     @classmethod
     def from_api(cls, data: dict) -> Self:
@@ -354,11 +355,17 @@ class GitLabClient:
             if info.state != "opened":
                 return info
 
-            appr = await gl.get(f"{base}/approvals")
-            if appr.status_code != 200:
-                return info
-
-            info.approved_by = [a["user"]["username"] for a in appr.json()["approved_by"]]
+            appr, revs = await asyncio.gather(
+                gl.get(f"{base}/approvals"), gl.get(f"{base}/reviewers")
+            )
+            if appr.status_code == 200:
+                info.approved_by = [a["user"]["username"] for a in appr.json()["approved_by"]]
+            if revs.status_code == 200:
+                info.changes_requested_by = [
+                    r["user"]["username"]
+                    for r in revs.json()
+                    if r.get("state") == "requested_changes"
+                ]
 
         if info.is_final:
             self._final_cache[mr.mr_url] = info
