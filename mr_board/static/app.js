@@ -389,7 +389,8 @@ function renderForgotten(stale) {
       <div class="l2"><span>${lies(mr)
         .map(([, cls, txt]) => `<span class="${cls}">${esc(txt)}</span>`)
         .join(" · ")} · ${esc(author(mr))} · ${ageTxt(mr.posted_at)}</span>
-        <a href="${esc(mr.mr_url)}" target="_blank" rel="noopener">Open in GitLab →</a></div>
+        <span class="go"><a href="${esc(postUrl(mr))}" target="_blank" rel="noopener">Mattermost →</a>
+        <a href="${esc(mr.mr_url)}" target="_blank" rel="noopener">GitLab →</a></span></div>
     </div>`,
           )
           .join("")

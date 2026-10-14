@@ -537,8 +537,12 @@ select {
 .sync .l2 .bad {
   color: var(--bad-ink);
 }
-.sync .l2 a {
+.sync .l2 .go {
   margin-left: auto;
+  display: flex;
+  gap: 12px;
+}
+.sync .l2 .go a {
   font-weight: 500;
   white-space: nowrap;
 }
