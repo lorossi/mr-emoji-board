@@ -101,6 +101,10 @@ function effective(mr) {
   return mr.emoji_state;
 }
 
+// A later :memo: doesn't take back a GitLab approval, so any approve reaction by `name` counts.
+const reactedApproved = (mr, name) =>
+  mr.reactions.some((r) => APPROVE.has(r.emoji) && U(r.user_id) === name);
+
 // Where the reactions disagree with GitLab: [short label for cards, severity, sentence].
 function lies(mr) {
   const gl = mr.gitlab,
@@ -118,8 +122,8 @@ function lies(mr) {
     out.push(["No GitLab approval", "bad", "Approved reaction, but no approval in GitLab"]);
   if (
     gl.state === "opened" &&
-    !["approved", "merged"].includes(mr.emoji_state) &&
-    gl.approved_by.length
+    mr.emoji_state !== "merged" &&
+    gl.approved_by.some((name) => !reactedApproved(mr, name))
   )
     out.push(["No approved reaction", "warn", "Approved in GitLab, no approved reaction"]);
   if (
@@ -207,7 +211,7 @@ function card(mr, me) {
           revs
             .map(
               (r) =>
-                `<span class="rev">${who(r.name, me)}<span class="st ${r.st}">${STATE_WORD[r.st]}</span></span>`,
+                `<span class="reviewer">${who(r.name, me)}<span class="st ${r.st}">${STATE_WORD[r.st]}</span></span>`,
             )
             .join("") || `<span class="nobody">no reviewer yet</span>`
         }
@@ -335,7 +339,7 @@ function yourTurn(mrs, me) {
     let item = null;
     if (gl?.state === "opened" && gl.changes_requested_by?.includes(me) && mr.emoji_state !== "commented")
       item = ["sync", "You requested changes in GitLab: add the pencil reaction", "Open thread", postUrl(mr)];
-    else if (gl?.state === "opened" && gl.approved_by?.includes(me) && !["approved", "merged"].includes(mr.emoji_state))
+    else if (gl?.state === "opened" && gl.approved_by?.includes(me) && mr.emoji_state !== "merged" && !reactedApproved(mr, me))
       item = ["sync", "You approved in GitLab: add the approved reaction", "Open thread", postUrl(mr)];
     else if (mine && lies(mr).length && ["merged", "closed"].includes(s))
       item = ["sync", `Your MR is ${s} in GitLab: update its reaction`, "Open thread", postUrl(mr)];

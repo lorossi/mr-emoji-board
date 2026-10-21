@@ -798,7 +798,7 @@ select {
 .arrow {
   color: var(--faint);
 }
-.rev {
+.reviewer {
   display: inline-flex;
   align-items: center;
   gap: 6px;
