@@ -40,7 +40,7 @@ const ICON = {
   sync: svg('<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'),
 };
 const COLS = [
-  ["needs_review", "Needs review", ICON.inbox, "Nothing waiting. Every open MR has a reviewer."],
+  ["needs_review", "Needs review", ICON.inbox, "Nothing waiting."],
   ["in_review", "In review", ICON.eye, "No reviews in progress."],
   ["commented", "Back to author", ICON.pencil, "Nothing waiting on authors."],
   ["approved", "Approved", ICON.check, "Nothing approved and unmerged."],
@@ -59,7 +59,7 @@ const store = {
   set(k, v) {
     try {
       localStorage.setItem("mrboard." + k, JSON.stringify(v));
-    } catch {}
+    } catch { }
   },
 };
 
@@ -207,14 +207,13 @@ function card(mr, me) {
     <div class="foot">
       <div class="people">
         ${who(author(mr), me)}<span class="arrow" aria-hidden="true">→</span>
-        ${
-          revs
-            .map(
-              (r) =>
-                `<span class="reviewer">${who(r.name, me)}<span class="st ${r.st}">${STATE_WORD[r.st]}</span></span>`,
-            )
-            .join("") || `<span class="nobody">no reviewer yet</span>`
-        }
+        ${revs
+      .map(
+        (r) =>
+          `<span class="reviewer">${who(r.name, me)}<span class="st ${r.st}">${STATE_WORD[r.st]}</span></span>`,
+      )
+      .join("") || `<span class="nobody">no reviewer yet</span>`
+    }
       </div>
       <div class="links">
         <span class="branch" title="Target branch">${mr.target && mr.target !== "master" ? `into ${esc(mr.target)}` : ""}</span>
@@ -366,15 +365,15 @@ function renderYours(mrs, me) {
   const tone = { sync: "", pencil: "", check: "ok", eye: "accent" };
   $("yours").innerHTML = items.length
     ? items
-        .map(
-          ([mr, kind, what, linkTxt, href]) => `<div class="row">
+      .map(
+        ([mr, kind, what, linkTxt, href]) => `<div class="row">
       <span class="ico ${tone[kind]}">${ICON[kind]}</span>
       <div class="what"><b>${esc(what)}</b>
         <span><span class="mono">${esc(ref(mr))}</span> · ${esc(mr.title)} · ${author(mr) === me ? "" : `by ${esc(author(mr))}, `}${ageTxt(since(mr))}</span></div>
       <a href="${esc(href)}" target="_blank" rel="noopener">${linkTxt} →</a>
     </div>`,
-        )
-        .join("")
+      )
+      .join("")
     : `<div class="none">Nothing is waiting on you.</div>`;
 }
 
@@ -386,18 +385,18 @@ function renderForgotten(stale) {
     ? `<div class="none">GitLab check disabled (no GITLAB_TOKEN).</div>`
     : stale.length
       ? stale
-          .map(
-            (mr) => `<div class="sync">
+        .map(
+          (mr) => `<div class="sync">
       <div class="l1"><a class="mono" href="${esc(mr.mr_url)}" target="_blank" rel="noopener">${esc(ref(mr))}</a>
         <span class="t" title="${esc(mr.title)}">${esc(mr.title)}</span></div>
       <div class="l2"><span>${lies(mr)
-        .map(([, cls, txt]) => `<span class="${cls}">${esc(txt)}</span>`)
-        .join(" · ")} · ${esc(author(mr))} · ${ageTxt(mr.posted_at)}</span>
+              .map(([, cls, txt]) => `<span class="${cls}">${esc(txt)}</span>`)
+              .join(" · ")} · ${esc(author(mr))} · ${ageTxt(mr.posted_at)}</span>
         <span class="go"><a href="${esc(postUrl(mr))}" target="_blank" rel="noopener">Mattermost →</a>
         <a href="${esc(mr.mr_url)}" target="_blank" rel="noopener">GitLab →</a></span></div>
     </div>`,
-          )
-          .join("")
+        )
+        .join("")
       : `<div class="none">Every reaction matches GitLab.</div>`;
 }
 
