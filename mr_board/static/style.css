@@ -611,6 +611,10 @@ select {
   background: var(--warn-bg);
   color: var(--warn);
 }
+.c-blocked .ico {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
 .c-approved .ico {
   background: var(--ok-bg);
   color: var(--ok);

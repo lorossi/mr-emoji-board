@@ -91,6 +91,9 @@ def rx(*names: str) -> list[Reaction]:
         (("white_check_mark", "merged"), "merged"),
         (("merged", "memo"), "merged"),  # merged is final
         (("eyes", "x"), "closed"),
+        (("eyes", "stop"), "blocked"),
+        (("stop", "white_check_mark"), "blocked"),  # blocked until the :stop: is removed
+        (("stop", "merged"), "merged"),
     ],
 )
 def test_emoji_state(names, expected):

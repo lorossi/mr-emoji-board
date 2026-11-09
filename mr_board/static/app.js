@@ -37,12 +37,16 @@ const ICON = {
   merge: svg(
     '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>',
   ),
+  stop: svg(
+    '<path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9Z"/><path d="M8 12h8"/>',
+  ),
   sync: svg('<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'),
 };
 const COLS = [
   ["needs_review", "Needs review", ICON.inbox, "Nothing waiting."],
   ["in_review", "In review", ICON.eye, "No reviews in progress."],
   ["commented", "Back to author", ICON.pencil, "Nothing waiting on authors."],
+  ["blocked", "Blocked", ICON.stop, "Nothing blocked."],
   ["approved", "Approved", ICON.check, "Nothing approved and unmerged."],
   ["merged", "Merged", ICON.merge, "Nothing merged lately."],
 ];

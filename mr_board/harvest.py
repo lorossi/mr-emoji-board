@@ -19,6 +19,7 @@ from mr_board.store import PostStore
 REVIEW = {"eyes", "eyesintensify"}
 COMMENT = {"memo", "pencil", "pencil2"}
 APPROVE = {"white_check_mark", "heavy_check_mark"}
+BLOCKED = {"stop"}
 MERGED = {"merged"}
 CLOSED = {"x", "no_entry_sign"}
 
@@ -40,6 +41,7 @@ class Reaction:
 class EmojiState(StrEnum):
     NEEDS_REVIEW = "needs_review"
     IN_REVIEW = "in_review"
+    BLOCKED = "blocked"
     COMMENTED = "commented"
     APPROVED = "approved"
     MERGED = "merged"
@@ -52,6 +54,8 @@ class EmojiState(StrEnum):
             return cls.MERGED
         if CLOSED & set(names):
             return cls.CLOSED
+        if BLOCKED & set(names):
+            return cls.BLOCKED
         # Last progress signal wins: a :pencil: after a :white_check_mark: sends it back to the author.
         for name in reversed(names):
             if name in APPROVE:
